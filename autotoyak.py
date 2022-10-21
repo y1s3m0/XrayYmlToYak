@@ -12,6 +12,8 @@ from lxml import etree
 
 requests.packages.urllib3.disable_warnings()
 
+ISUPDATE = False
+
 
 def sendPlugin(j):
     authToken = ""
@@ -130,7 +132,9 @@ def bulidPlugin(poc):
         "plugin_selector_types":
         "mitm,port-scan",
         "is_general_module":
-        False
+        False,
+        "id":
+        0
     }
     # print(uploadBody)
     if "poc-yaml" not in poc["name"]:
@@ -187,6 +191,9 @@ def bulidPlugin(poc):
     # sys.exit(0)
     uploadBody["content"] = getContent(poc, severity, uploadBody["script_name"])
     if uploadBody["content"]:
+        if ISUPDATE:
+            uploadBody["id"] = getOnlineid(uploadBody["script_name"])
+            print(uploadBody["id"])
         sendPlugin(uploadBody)
     # print(uploadBody["script_name"])
     # print(uploadBody["help"])
@@ -194,6 +201,7 @@ def bulidPlugin(poc):
     # print("===========================================")
     # print(uploadBody)
     # print(uploadBody["content"])
+
 
 def getCve(cve):
     url = "https://avd.aliyun.com/"
@@ -292,7 +300,8 @@ handleCheck = func(target,port){
             print("drop" + poc["name"])
             return False
         if "path" in r["request"]:
-            code = code + "\r\n" + '    poc_url_' + r_key + ', _ = str.UrlJoin(url, `' + r["request"]["path"] + '`)'
+            # code = code + "\r\n" + '    poc_url_' + r_key + ', _ = str.UrlJoin(url, `' + r["request"]["path"] + '`)'
+            code = code + "\r\n" + '    poc_url_' + r_key + '= url + `' + r["request"]["path"] + '`'
         else:
             code = code + "\r\n" + '    poc_url_' + r_key + ' = url'
 
@@ -393,6 +402,16 @@ handleCheck = func(target,port){
     # print(code)
 
     return start_code + info + code + end_code
+
+
+def getOnlineid(script_name):
+    conn = sqlite3.connect("C:\\Users\\dogs\\yakit-projects\\default-yakit.db")
+    cursor = conn.cursor()
+    sql = ''' SELECT online_id FROM main.yak_scripts WHERE script_name='%s' ''' % (script_name)
+    cursor.execute(sql)
+    authToken = cursor.fetchall()[0][0]
+    conn.close()
+    return int(authToken)
 
 
 if __name__ == '__main__':
