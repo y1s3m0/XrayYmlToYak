@@ -3,8 +3,8 @@ import json
 import os
 import re
 import sqlite3
-import sys
 from random import randint
+import sys
 
 import requests
 import yaml
@@ -12,31 +12,11 @@ from lxml import etree
 
 requests.packages.urllib3.disable_warnings()
 
-ISUPDATE = False
+# https://stack.chaitin.com/api/v2/xray/poctype/ json id
+ISUPDATE = True
 
 
-def sendPlugin(j):
-    authToken = ""
-    conn = sqlite3.connect("C:\\Users\\dogs\\yakit-projects\\default-yakit.db")
-    cursor = conn.cursor()
-    sql = ''' SELECT value FROM main.general_storages WHERE key='"token-online"' '''
-    cursor.execute(sql)
-    authToken = cursor.fetchall()[0][0][1:-1]
-    conn.close()
-
-    # data = json.loads(json.dumps(j).encode('utf-8').decode('unicode_escape').encode('utf-8'))
-    # print(j)
-    # sys.exit(0)
-    headers = {"User-Agent": "axios/0.26.1", "Authorization": authToken, "Content-Type": "application/json"}
-    proxies = {'http': '127.0.0.1:8083', 'https': '127.0.0.1:8083'}
-    x = requests.post("https://www.yaklang.com/api/yakit/plugin", json=j, headers=headers, verify=False)
-    print(x.content.decode('utf-8'))
-    if x.status_code != 200:
-        return False
-    return True
-
-
-def crawPoc(path):
+def crawLocalPoc(path):
     # path = "C:\\Users\\dogs\\yakit-projects\\repos\\myplugins\\xray\\pocs"  # 文件夹目录
     nopoc = [
         "dedecms-guestbook-sqli", "drupal-cve-2018-7600-rce", "etcd-unauth", "flexpaper-cve-2018-11686",
@@ -78,7 +58,7 @@ def crawPoc(path):
         "wifisky-default-password-cnvd-2021-39012", "wordpress-cve-2019-19985-infoleak", "wordpress-ext-adaptive-images-lfi",
         "wordpress-ext-mailpress-rce", "wuzhicms-v410-sqli", "xdcms-sql", "xiuno-bbs-cvnd-2019-01348-reinstallation",
         "xunchi-cnvd-2020-23735-file-read", "yapi-rce", "yccms-rce", "yongyou-u8-oa-sqli", "yonyou-grp-u8-sqli-to-rce",
-        "yonyou-grp-u8-sqli", "yonyou-nc-arbitrary-file-upload", "yonyou-nc-bsh-servlet-bshservlet-rce",
+        "yonyou-grp-u8-sqli", "yonyou-nc-arbitrary-file-upload", "yonyou1-nc-bsh-servlet-bshservlet-rce",
         "youphptube-encoder-cve-2019-5127", "youphptube-encoder-cve-2019-5128", "youphptube-encoder-cve-2019-5129",
         "yungoucms-sqli", "zcms-v3-sqli", "zeit-nodejs-cve-2020-5284-directory-traversal", "zeroshell-cve-2019-12725-rce",
         "zimbra-cve-2019-9670-xxe", "zzcms-zsmanage-sqli"
@@ -86,15 +66,16 @@ def crawPoc(path):
     files = os.listdir(path)  # 得到文件夹下的所有文件名称
     for file in files:  # 遍 历文件夹
         if not os.path.isdir(file):  # 判断是否是文件夹，不是文件夹才打开
+            # print(file)
             if file[:-4] in nopoc:
                 with open(path + "/" + file, encoding='utf-8') as f:  # demo.yaml内容同上例yaml字符串
                     # print(yaml.safe_load(f))
-                    # print(file)
+
                     poc = yaml.safe_load(f)
-                    bulidPlugin(poc)
+                    bulidPluginFromLocalPoc(poc)
 
 
-def bulidPlugin(poc):
+def bulidPluginFromLocalPoc(poc):
 
     uploadBody = {
         "type":
@@ -158,6 +139,7 @@ def bulidPlugin(poc):
         n = 0
         cve = ""
         severity = ""
+        type = ""
         while n < len(name):
             na = name[n]
             if na == "cve" or na == "cnvd":
@@ -189,10 +171,10 @@ def bulidPlugin(poc):
     # elasticsearch cve-2015-3337 lfi
 
     # sys.exit(0)
-    uploadBody["content"] = getContent(poc, severity, uploadBody["script_name"])
+    uploadBody["content"] = getContent(poc, severity, uploadBody["script_name"], type)
     if uploadBody["content"]:
         if ISUPDATE:
-            uploadBody["id"] = getOnlineid(uploadBody["script_name"])
+            uploadBody["id"] = getPluginid(uploadBody["script_name"])
             print(uploadBody["id"])
         sendPlugin(uploadBody)
     # print(uploadBody["script_name"])
@@ -203,6 +185,216 @@ def bulidPlugin(poc):
     # print(uploadBody["content"])
 
 
+def crawOnlinePoc():
+    next_url = "https://stack.chaitin.com/api/v2/xray/poc/list/?limit=10&offset=0"
+    poc_url = "https://stack.chaitin.com/api/v2/xray/pocdetail/"
+    proxies = {'http': '127.0.0.1:8083', 'https': '127.0.0.1:8083'}
+    list = []
+    pocs = []
+    while next_url != "":
+        x = requests.get(next_url, proxies=proxies, verify=False)
+        data = json.loads(x.content.decode('utf-8'))
+
+        # print(data)
+        if data["data"]["next"]:
+            target = data["data"]["next"].replace("http://", "https://")
+            next_url = target
+        else:
+            next_url = ""
+
+        for poc in data["data"]["list"]:
+            if poc["status"] == "1" and poc:
+                poc_url_id = poc_url + "%s/" % (poc["id"])
+                y = requests.get(poc_url_id, proxies=proxies, verify=False)
+                data = json.loads(y.content.decode('utf-8'))["data"]
+                if data["check_coin"] == 0:
+                    pocs.append(data)
+                    # bulidPluginFromOnlinePoc(data)
+        list.append(poc)
+        # if target == "https://stack.chaitin.com/api/v2/xray/poc/list/?limit=10&offset=400":
+        #     print(list)
+        #     print(pocs)
+        #     sys.exit()
+    with open('list.json', 'w', encoding="utf-8") as file:
+        json.dump(list, file, ensure_ascii=False)
+    with open('pocs.json', 'w', encoding="utf-8") as file:
+        json.dump(pocs, file, ensure_ascii=False)
+
+
+def bulidPluginFromOnlinePoc(data):
+    poc, cve, severity = yaml.safe_load(data["code1"]), data["cve_num"], data["risk_level"]
+    loophole_type = {
+        41: "文件写入",
+        40: "命令执行",
+        39: "原型链污染",
+        38: "其他",
+        37: "加密问题",
+        36: "代码注入",
+        35: "类型混淆",
+        34: "内存安全",
+        33: "条件竞争",
+        32: "未初始化变量",
+        31: "格式化字符串",
+        30: "整数溢出",
+        29: "缓冲区溢出",
+        28: "拒绝服务",
+        27: "逻辑",
+        26: "不安全的配置",
+        25: "未授权访问",
+        24: "信息泄露",
+        23: "越权",
+        22: "URL跳转",
+        21: "文件删除",
+        20: "文件读取",
+        19: "文件修改",
+        18: "文件包含",
+        17: "文件上传",
+        16: "点击劫持",
+        15: "模板注入",
+        14: "CRLF注入",
+        13: "LDAP注入",
+        12: "弱口令",
+        11: "路径遍历",
+        10: "反序列化",
+        9: "SSRF",
+        8: "XPath注入",
+        7: "后门",
+        6: "CSRF",
+        5: "XML实体注入",
+        4: "XSS",
+        3: "SQL注入",
+    }
+    type = loophole_type[data["loophole_type"]]
+
+    uploadBody = {
+        "type":
+        "port-scan",
+        "script_name":
+        "模块名",
+        "content":
+        "源码",
+        "tags": ["tags"],
+        "params": [{
+            "field": "target",
+            "default_value": "",
+            "type_verbose": "string",
+            "field_verbose": "扫描的目标",
+            "help": "",
+            "required": True,
+            "group": "",
+            "extra_setting": ""
+        }, {
+            "field": "ports",
+            "default_value": "80",
+            "type_verbose": "string",
+            "field_verbose": "端口",
+            "help": "",
+            "required": False,
+            "group": "",
+            "extra_setting": ""
+        }],
+        "help":
+        "描述",
+        "contributors":
+        "y1s3m0",
+        "default_open":
+        True,
+        "enable_plugin_selector":
+        False,
+        "plugin_selector_types":
+        "mitm,port-scan",
+        "is_general_module":
+        False,
+        "id":
+        0
+    }
+    # print(uploadBody)
+    if "poc-yaml" not in poc["name"]:
+        print("drop not poc " + poc["name"])
+        return False
+    if "search" in str(poc["rules"]):
+        print("drop search " + poc["name"])
+        # drop search poc-yaml-dedecms-guestbook-sqli
+        # drop search poc-yaml-drupal-cve-2018-7600-rce
+        # drop search poc-yaml-gitlist-rce-cve-2018-1000533
+        # drop search poc-yaml-h2-database-web-console-unauthorized-access
+        # drop search poc-yaml-jenkins-unauthorized-access
+        # drop search poc-yaml-jira-cve-2019-11581
+        # drop search poc-yaml-joomla-cnvd-2019-34135-rce
+        # drop search poc-yaml-kyan-network-monitoring-account-password-leakage
+        # drop search poc-yaml-maccms-rce
+        return False
+    if "payloads" in str(poc["rules"]):
+        print("drop payloads " + poc["name"])
+        return False
+    name = poc["name"][9:].split("-")
+    tags = []
+    n = 0
+    while n < len(name):
+        na = name[n]
+        if na == "cve" or na == "cnvd":
+            cve = na + "-" + name[n + 1] + "-" + name[n + 2]
+            tags.append(cve)
+            n += 3
+        else:
+            tags.append(na)
+            n += 1
+
+    # print(tags)
+    uploadBody["help"] = data["notes"]
+
+    if cve != "无":
+        uploadBody["script_name"], uploadBody["help"], severity_str = getCve(cve)
+    else:
+        uploadBody["script_name"] = " ".join(tags) + " 漏洞"
+        # print(uploadBody["script_name"])
+
+    tags.append(type)
+    uploadBody["tags"] = tags
+
+    # elasticsearch cve-2015-3337 lfi 漏洞
+    # uploadBody["type"] = "port-scan"
+    # elasticsearch cve-2015-3337 lfi
+
+    # sys.exit(0)
+    uploadBody["content"] = getContent(poc, severity, uploadBody["script_name"], type)
+    if uploadBody["content"]:
+        if ISUPDATE:
+            uploadBody["id"] = getPluginid(uploadBody["script_name"])
+            print(uploadBody["id"])
+        sendPlugin(uploadBody)
+    # print(uploadBody["script_name"])
+    # print(uploadBody["help"])
+    # print(severity)
+    print("===============================================================================================================")
+    print(uploadBody)
+    sys.exit(1)
+    # print(uploadBody["content"])
+
+
+# send Json
+def sendPlugin(j):
+    authToken = ""
+    conn = sqlite3.connect("C:\\Users\\dogs\\yakit-projects\\default-yakit.db")
+    cursor = conn.cursor()
+    sql = ''' SELECT value FROM main.general_storages WHERE key='"token-online"' '''
+    cursor.execute(sql)
+    authToken = cursor.fetchall()[0][0][1:-1]
+    conn.close()
+
+    # data = json.loads(json.dumps(j).encode('utf-8').decode('unicode_escape').encode('utf-8'))
+    # print(j)
+    # sys.exit(0)
+    headers = {"User-Agent": "axios/0.26.1", "Authorization": authToken, "Content-Type": "application/json"}
+    proxies = {'http': '127.0.0.1:8083', 'https': '127.0.0.1:8083'}
+    x = requests.post("https://www.yaklang.com/api/yakit/plugin", json=j, headers=headers, verify=False)
+    print(x.content.decode('utf-8'))
+    if x.status_code != 200:
+        return False
+    return True
+
+
+# aliyun get cve detall
 def getCve(cve):
     url = "https://avd.aliyun.com/"
     # proxies = {'http': '127.0.0.1:8083', 'https': '127.0.0.1:8083'}
@@ -229,27 +421,32 @@ def getCve(cve):
     return script_name, vuln_detal, severity
 
 
-def getContent(poc, severity, reference):
+# yml to yak
+def getContent(poc, severity, reference, type):
     info = '''
-    # type="文件上传"
-    =level[3]
+    type="文件上传"
+    severity =level[3]
     reference="财务管理软件任意文件上传"
 '''
     info = "\r\n    reference=\"" + reference + "\""
-    info = info + "\r\n    severity=\"" + severity + "\""
+    if isinstance(severity, int):
+        info = info + "\r\n    severity=level[" + str(severity) + "]"
+    elif isinstance(severity, str):
+        info = info + "\r\n    severity=\"" + severity + "\""
+    info = info + "\r\n    type=\"" + type + "\""
 
     end_code = '''
     if vulnable {
             yakit.Info("FOUND INFO for %v", type)
             risk.NewRisk(
                 url, risk.severity(severity), 
-                # risk.title(sprintf("FOUND %v", type)),
+                risk.title(sprintf("FOUND %v", type)),
                 risk.titleVerbose(sprintf("%v", reference)),
-                # risk.type(type), risk.typeVerbose(type),
+                risk.type(type), risk.typeVerbose(type),
                 risk.details({
-                    "request": resp.Request,
-                    "response": resp,
-                    "url": url,
+                    "request": breq,
+                    "response": bresp,
+                    "url": poc_url,
                 }),
             )
         }
@@ -269,7 +466,7 @@ handle = func(result) {
 handleCheck = func(target,port){
     addr = str.HostPort(target, port)
     isTls = str.IsTLSServer(addr)
-    level=["low","middle","high","critical"]
+    level=["","low","middle","high","critical"]
     if isTls {
         url="https://"+addr
     }else{
@@ -305,7 +502,7 @@ handleCheck = func(target,port){
         else:
             code = code + "\r\n" + '    poc_url_' + r_key + ' = url'
 
-        code = code + "\r\n" + '    resp_' + r_key + ', _ := http.Request("' + r["request"][
+        code = code + "\r\n" + '    req_' + r_key + ', _ := http.NewRequest("' + r["request"][
             "method"] + '",poc_url_' + r_key + ','
 
         if "headers" in r["request"]:
@@ -319,13 +516,17 @@ handleCheck = func(target,port){
         #     redirect = "true" if r["request"]["follow_redirects"] else "false"
         #     code = code + "\r\n" + '    http.redirect(' + redirect + '),'
         code = code + ')'
+        code = code + "\r\n" + '    breq,_=http.dump(req_' + r_key + ')'
+        code = code + "\r\n" + '    resp_' + r_key + ', _ := http.Do(' + 'req_' + r_key + ')'
         code = code + "\r\n" + '    bresp,_=http.dump(resp_' + r_key + ')'
         code = code + "\r\n" + '    header, body = poc.Split(bresp)'
 
         code = code + "\r\n    " + r_key + '_flag = false'
         if "expression" in r:
             pandan = r["expression"].replace("status", "StatusCode")
-            pandan = pandan.replace("response.body.bcontains(bytes(", "str.Contains(string(body),string(")
+            pandan = pandan.replace("string(b", "parseStr(")
+            pandan = pandan.replace("string(", "parseStr(")
+            pandan = pandan.replace("response.body.bcontains(bytes(", "str.Contains(string(body),parseStr(")
             pandan = pandan.replace("response.body.bcontains(b\"", "str.Contains(string(body),\"")
             p = re.compile(r'response\.headers\[.*?\].*?\"(.*?)\"[\)]*')
             for match in p.finditer(pandan):
@@ -337,7 +538,7 @@ handleCheck = func(target,port){
 
             p = re.compile(r'\s\"(.*?)\"\.bmatches\(response\.body\)')
             for match in p.finditer(pandan):
-                pandan = p.sub(" re.Match(\"" + match.group(1) + "\",string(body))", pandan)
+                pandan = p.sub(" re.Match(`" + match.group(1) + "`,string(body))", pandan)
             pandan = pandan.replace("md5(", "codec.Md5(")
             pandan = pandan.replace("base64(", "codec.EncodeBase64(")
             pandan = pandan.replace("base64Decode(", "codec.DecodeBase64(")
@@ -347,7 +548,8 @@ handleCheck = func(target,port){
             p = re.compile(r'substr\((.*?),(.*?),(.*?)\)')
             for match in p.finditer(pandan):
                 pandan = p.sub(match.group(1) + "[" + match.group(2) + ":" + match.group(3) + "]", pandan)
-
+            pandan = pandan.replace("\r", "")
+            pandan = pandan.replace("\n", "")
             pandan = pandan.replace("response.headers", "response.Headers")
             pandan = pandan.replace("response.body", "body")
             pandan = pandan.replace("response.", "resp_" + r_key + ".")
@@ -361,7 +563,6 @@ handleCheck = func(target,port){
             code = code + "\r\n\t" + r_key + '_flag = true'
             code = code + "\r\n" + '    }\r\n'
 
-    code = code + '\r\n    resp=resp_' + r_key
     code = code + '\r\n    poc_url=poc_url_' + r_key
     if "expression" in poc:
         pandan = poc["expression"]
@@ -378,7 +579,7 @@ handleCheck = func(target,port){
             set_list.append(set_key)
             # if "newReverse" in set_value:
             if "randomInt" in set_value:
-                randomInt = randint(int(re.findall("\d+", set_value)[0]), int(re.findall("\d+", set_value)[1]))
+                randomInt = randint(int(re.findall("-?\d+", set_value)[0]), int(re.findall("-?\d+", set_value)[1]))
                 code = "\r\n" + '    ' + set_key + ' = ' + str(randomInt) + code
             elif "randomLowercase" in set_value:
                 code = "\r\n" + '    ' + set_key + ' = str.RandStr(' + re.findall("\d+", set_value)[0] + ')' + code
@@ -392,7 +593,7 @@ handleCheck = func(target,port){
                 reverse = True
             else:
                 return False  # request.url.host
-            code = code.replace('{{' + set_key + '}}', '`+ string(' + set_key + ') +`')
+            code = code.replace('{{' + set_key + '}}', '`+ parseStr(' + set_key + ') +`')
         if reverse:
             code = dnslog + code
     # set()
@@ -404,7 +605,8 @@ handleCheck = func(target,port){
     return start_code + info + code + end_code
 
 
-def getOnlineid(script_name):
+# get yakit onlineid
+def getPluginid(script_name):
     conn = sqlite3.connect("C:\\Users\\dogs\\yakit-projects\\default-yakit.db")
     cursor = conn.cursor()
     sql = ''' SELECT online_id FROM main.yak_scripts WHERE script_name='%s' ''' % (script_name)
@@ -415,55 +617,23 @@ def getOnlineid(script_name):
 
 
 if __name__ == '__main__':
-    path = "C:\\Users\\dogs\\yakit-projects\\repos\\myplugins\\xray\\pocs"
-    crawPoc(path)
-
-    # with open('C:\\Users\\dogs\\yakit-projects\\repos\\myplugins\\xray\\pocs\\weblogic-cve-2017-10271.yml',
-    #           encoding='utf-8') as f:
+    # ==========================================================================
+    # 上传列表里的poc
+    # path = "C:\\Users\\dogs\\yakit-projects\\repos\\myplugins\\xray\\pocs"
+    # crawLocalPoc(path)
+    # ==========================================================================
+    # 测试单个poc
+    # path = "C:\\Users\\dogs\\yakit-projects\\repos\\myplugins\\xray\\pocs"
+    # file = "zeit-nodejs-cve-2020-5284-directory-traversal.yml"
+    # # file = "vmware-vcenter-cve-2021-21985-rce.yml"
+    # with open(path + "/" + file, encoding='utf-8') as f:  # demo.yaml内容同上例yaml字符串
     #     # print(yaml.safe_load(f))
     #     poc = yaml.safe_load(f)
-    #     bulidPlugin(poc)
-
-    # path = "C:\\Users\\dogs\\yakit-projects\\repos\\myplugins\\xray\\pocs"  # 文件夹目录
-    # files = os.listdir(path)  # 得到文件夹下的所有文件名称
-    # for file in files:  # 遍 历文件夹
-    #     if not os.path.isdir(file):  # 判断是否是文件夹，不是文件夹才打开
-    #         with open(path + "/" + file, encoding='utf-8') as f:  # demo.yaml内容同上例yaml字符串
-    #             # print(yaml.safe_load(f))
-    #             poc = yaml.safe_load(f)
-    #             print(file + ":................")
-    #             for r_key, r in dict.items(poc["rules"]):
-    #                 code = ""
-    #                 pandan = r["expression"].replace("status", "StatusCode")
-    #                 pandan = pandan.replace("response.body.bcontains(bytes(", "str.Contains(string(body),string(")
-    #                 pandan = pandan.replace("response.body.bcontains(b\"", "str.Contains(string(body),\"")
-    #                 p = re.compile(r'response\.headers\[.*?\].*?\"(.*?)\"[\)]*')
-    #                 for match in p.finditer(pandan):
-    #                     pandan = p.sub("str.Contains(string(header),\"" + match.group(1) + "\")", pandan)
-
-    #                 p = re.compile(r'response\.content_type.*?\"(.*?)\"[\)]*')
-    #                 for match in p.finditer(pandan):
-    #                     pandan = p.sub("str.Contains(string(header),\"" + match.group(1) + "\")", pandan)
-
-    #                 p = re.compile(r'\s\"(.*?)\"\.bmatches\(response\.body\)')
-    #                 for match in p.finditer(pandan):
-    #                     pandan = p.sub(" re.Match(\"" + match.group(1) + "\",string(body))", pandan)
-    #                 pandan = pandan.replace("md5(", "codec.Md5(")
-    #                 pandan = pandan.replace("base64(", "codec.EncodeBase64(")
-    #                 pandan = pandan.replace("base64Decode(", "codec.DecodeBase64(")
-    #                 pandan = pandan.replace("urlencode(", "codec.EncodeUrl(")
-    #                 pandan = pandan.replace("urldecode(", "codec.DecodeUrl(")
-
-    #                 p = re.compile(r'substr\((.*?),(.*?),(.*?)\)')
-    #                 for match in p.finditer(pandan):
-    #                     pandan = p.sub(match.group(1) + "[" + match.group(2) + ":" + match.group(3) + "]", pandan)
-
-    #                 pandan = pandan.replace("response.headers", "response.Headers")
-    #                 pandan = pandan.replace("response.body", "body")
-    #                 pandan = pandan.replace("response.", "resp_" + r_key + ".")
-    #                 code = code + "\r\n" + '    if ' + pandan + '{'
-    #                 code = code + "\r\n\t" + r_key + '_flag = true'
-    #                 code = code + "\r\n" + '    }'
-    #                 print(r["expression"])
-    #                 print(code)
-    #             print(poc["expression"])
+    #     bulidPluginFromLocalPoc(poc)
+    # =============================================================================
+    # 测试在线poc
+    y = requests.get("https://stack.chaitin.com/api/v2/xray/pocdetail/828/", verify=False)
+    data = json.loads(y.content.decode('utf-8'))["data"]
+    if data["check_coin"] == 0:
+        bulidPluginFromOnlinePoc(data)
+    # crawOnlinePoc()
